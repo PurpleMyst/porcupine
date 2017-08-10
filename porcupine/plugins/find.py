@@ -67,7 +67,7 @@ class Finder(tk.Frame):
         self.reset()
         super().pack(*args, **kwargs)
 
-    def _next_match(self):
+    def _next_match(self, start_from=0):
         what = self._find_entry.get()
         full_words = self._full_words_var.get()
 
@@ -79,20 +79,32 @@ class Finder(tk.Frame):
         else:
             regexp = re.escape(what)
 
+        found_matches = True
+
         if self._last_pattern != regexp:
             matches = []
             for y, line in enumerate(self._textwidget.iter_lines()):
+                if y < start_from:
+                    continue
+
                 for match in re.finditer(regexp, line):
                     matches.append((y + 1, match.start(),
                                     match.end() - match.start()))
 
+            found_matches = bool(self._matches)
             self._last_pattern = regexp
             self._matches = iter(matches)
 
-        return next(self._matches, None)
+        # If we have exhausted our matches, and there were matches before, we
+        # restart the finding process.
+        next_match = next(self._matches, None)
+        if found_matches and next_match is None:
+            self._last_pattern = None
+            return self._next_match()
+        return next_match
 
-    def find(self):
-        match = self._next_match()
+    def find(self, start_from=0):
+        match = self._next_match(start_from)
 
         if match is not None:
             self._statuslabel['text'] = ''
@@ -107,9 +119,9 @@ class Finder(tk.Frame):
             self._textwidget.mark_set('insert', start)
             self._textwidget.see(start)
             return True
-        else:
-            self._statuslabel['text'] = "I can't find it :("
-            return False
+
+        self._statuslabel['text'] = "I can't find it :("
+        return False
 
     def replace(self):
         find_text = self._find_entry.get()
@@ -137,15 +149,32 @@ class Finder(tk.Frame):
         self._textwidget.tag_add('sel', start, new_end)
 
     def replace_and_find(self):
+        # We do this weird trickery with starting from the line the last
+        # replacement was on because we don't want to get stuck in an infinite
+        # loop when the replacement contains the pattern.
+        line, _ = map(int, self._textwidget.index("insert").split("."))
         self.replace()
-        self.find()
+
+        # If we wanted to start from the same line, we'd say line - 1.
+        # Here we want the line after the current one, so we just say line.
+        # This is cause tkinter's lines are 1-based but self.find takes 0-based
+        # lines.
+        # TODO: Should this cycle?
+        self.find(start_from=line)
 
     def replace_all(self):
         old_cursor_pos = self._textwidget.index("insert")
 
+        # See replace_and_find for an explanation as to why we do this weird
+        # keeping-track-of-the-line trickery.
         count = 0
-        while self.find():
+        line = 1
+        while self.find(line):
             self.replace()
+
+            # See replace_and_find for an explanation as to why we don't
+            # subtract from the line.
+            line, _ = map(int, self._textwidget.index("insert").split("."))
             count += 1
 
         self._textwidget.tag_remove('sel', '1.0', 'end')
