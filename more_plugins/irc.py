@@ -13,8 +13,10 @@ Server = collections.namedtuple("Server", ["name"])
 Message = collections.namedtuple("Message", ["sender", "command", "args"])
 
 
-class ActualIrc:
+class IrcCore:
     def __init__(self, encoding="utf-8"):
+        # TODO at some point: Private messages, multiple channels, multiple
+        # servers maybe, colors, and an ever-present nicklist.
         self.nick = None
         self._server = None
         self.encoding = encoding
@@ -91,6 +93,9 @@ class ActualIrc:
         self._send("PRIVMSG", recipient,
                    ":\x01ACTION {}\x01".format(action))
 
+    def quit(self, message="goodbye, world"):
+        self._send("QUIT", ":" + message)
+
     def mainloop(self):
         while True:
             line = self._recv_line()
@@ -107,8 +112,13 @@ class IrcTab(Tab):
     def __init__(self, manager):
         super().__init__(manager)
         self.top_label['text'] = "IRC"
+        self._init_frame = self._build_init_frame()
 
-        fr = self._init_frame = tk.Frame(self)
+        # Because pylint is magic.
+        self.irc_core = self.server = self.nick = self.chan = None
+
+    def _build_init_frame(self):
+        fr = tk.Frame(self)
 
         self._server_entry = self._add_entry(fr, 0, "Server:")
         self._nick_entry = self._add_entry(fr, 1, "Nickname:")
@@ -120,12 +130,15 @@ class IrcTab(Tab):
         self._status_label = tk.Label(fr)
         self._status_label.grid(row=3, column=1, columnspan=2, sticky='nswe')
 
-        self._init_frame.pack()
+        fr.pack()
+        return fr
 
     def _add_entry(self, frame, row, text, callback=None):
         tk.Label(frame, text=text).grid(row=row, column=0)
         entry = tk.Entry(frame, width=35, font='TkFixedFont')
         entry.bind('<Escape>', lambda event: self.pack_forget())
+        entry.bind('<Control-A>', self._on_control_a)
+        entry.bind('<Control-a>', self._on_control_a)
         if callback is not None:
             entry.bind('<Return>', lambda event: callback())
         entry.grid(row=row, column=1, sticky='we')
@@ -148,19 +161,82 @@ class IrcTab(Tab):
 
         self._init_frame.pack_forget()
 
+        self.server = server
+        self.nick = nick
+        self.chan = chan
+
         threading.Thread(target=self._actual_irc,
                          args=(server, nick, chan)).start()
 
     def _actual_irc(self, server, nick, chan):
-        irc_client = ActualIrc()
-        irc_client.connect(nick, server)
-        irc_client.join_channel(chan)
+        textarea = tk.Frame(self)
+        self._text = tk.Text(textarea, state='disabled')
+        self._text.pack(side='left', fill='both', expand=True)
+        scrollbar = tk.Scrollbar(textarea, command=self._text.yview)
+        scrollbar.pack(side='right', fill='y')
+        self._text['yscrollcommand'] = scrollbar.set
+        textarea.pack(fill='both', expand=True)
 
-        threading.Thread(target=irc_client.mainloop).start()
+        entry = tk.Entry(self, font='TkFixedFont')
+        entry.pack(fill='x')
+        entry.bind('<Return>', self._on_enter)
+        entry.bind('<Control-A>', self._on_control_a)
+        entry.bind('<Control-a>', self._on_control_a)
+
+        self._show_info("Connecting...")
+        self.irc_core = IrcCore()
+        self.irc_core.connect(nick, server)
+        self.irc_core.join_channel(chan)
+
+        self.bind("<Destroy>", lambda *_: self.irc_core.quit())
+
+        threading.Thread(target=self.irc_core.mainloop).start()
         while True:
-            msg = irc_client.message_queue.get()
-            # TODO: Actually show messages.
-            irc_client.message_queue.task_done()
+            msg = self.irc_core.message_queue.get()
+            if msg.command == "353":
+                self._show_info("People present: %s" % (msg.args[3],))
+            elif msg.command == "366":
+                # We wait until the end of the nick list to say we're
+                # connected, even though we may actually be connected earlier.
+                self._show_info("Connected!")
+            elif msg.command == "JOIN":
+                self._show_info("%s joined." % (msg.sender.nick,))
+            elif msg.command == "PART":
+                reason = msg.args[1] if len(msg.args) >= 2 else "No reason."
+                self._show_info("%s parted. (%s)" % (msg.sender.nick, reason))
+            elif msg.command == "PRIVMSG" and msg.args[0] == chan:
+                self._show_message(msg.sender.nick, msg.args[1])
+            self.irc_core.message_queue.task_done()
+
+    def _show_message(self, sender_nick, text):
+        self._text['state'] = 'normal'
+        self._text.insert('end', "<%s> %s" % (sender_nick, text))
+        self._text.insert('end', '\n')
+        self._text.see('end')
+        self._text['state'] = 'disabled'
+
+    def _show_info(self, info):
+        self._text['state'] = 'normal'
+        self._text.insert('end', "[INFO] %s" % (info,))
+        self._text.insert('end', '\n')
+        self._text.see('end')
+        self._text['state'] = 'disabled'
+
+    @staticmethod
+    def _on_control_a(event):
+        entry = event.widget
+        entry.selection_range(0, 'end')
+        return 'break'
+
+    def _on_enter(self, event):
+        entry = event.widget
+        msg = entry.get()
+        if getattr(self, "irc_core", None) is not None:
+            self.irc_core.send_privmsg(self.chan, msg)
+            self._show_message(self.nick, msg)
+        else:
+            self._show_info("You're not connected yet!")
+        entry.delete(0, 'end')
 
 
 def go_onto_irc():
