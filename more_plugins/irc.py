@@ -149,13 +149,9 @@ class IrcTab(Tab):
         nick = self._nick_entry.get()
         chan = self._chan_entry.get()
 
-        try:
-            assert server
-            assert nick
-            assert chan
-            assert " " not in nick
-            assert chan.startswith("#")
-        except AssertionError:
+        if not (server and nick and chan and
+                " " not in nick and
+                chan.startswith("#")):
             self._status_label["text"] = "Something is invalid!"
             return
 
@@ -188,7 +184,7 @@ class IrcTab(Tab):
         self.irc_core.connect(nick, server)
         self.irc_core.join_channel(chan)
 
-        self.bind("<Destroy>", lambda *_: self.irc_core.quit())
+        self.bind("<Destroy>", lambda _: self.irc_core.quit())
 
         threading.Thread(target=self.irc_core.mainloop).start()
         while True:
