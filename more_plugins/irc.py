@@ -160,11 +160,9 @@ class IrcTab(Tab):
         self.server = server
         self.nick = nick
         self.chan = chan
+        self._connect_to_irc()
 
-        threading.Thread(target=self._actual_irc,
-                         args=(server, nick, chan)).start()
-
-    def _actual_irc(self, server, nick, chan):
+    def _connect_to_irc(self):
         textarea = tk.Frame(self)
         self._text = tk.Text(textarea, state='disabled')
         self._text.pack(side='left', fill='both', expand=True)
@@ -181,28 +179,32 @@ class IrcTab(Tab):
 
         self._show_info("Connecting...")
         self.irc_core = IrcCore()
-        self.irc_core.connect(nick, server)
-        self.irc_core.join_channel(chan)
+        self.irc_core.connect(self.nick, self.server)
+        self.irc_core.join_channel(self.chan)
 
         self.bind("<Destroy>", lambda _: self.irc_core.quit())
 
-        threading.Thread(target=self.irc_core.mainloop).start()
-        while True:
-            msg = self.irc_core.message_queue.get()
-            if msg.command == "353":
-                self._show_info("People present: %s" % (msg.args[3],))
-            elif msg.command == "366":
-                # We wait until the end of the nick list to say we're
-                # connected, even though we may actually be connected earlier.
-                self._show_info("Connected!")
-            elif msg.command == "JOIN":
-                self._show_info("%s joined." % (msg.sender.nick,))
-            elif msg.command == "PART":
-                reason = msg.args[1] if len(msg.args) >= 2 else "No reason."
-                self._show_info("%s parted. (%s)" % (msg.sender.nick, reason))
-            elif msg.command == "PRIVMSG" and msg.args[0] == chan:
-                self._show_message(msg.sender.nick, msg.args[1])
-            self.irc_core.message_queue.task_done()
+        threading.Thread(itarget=self.irc_core.mainloop).start()
+        self._handle_messages()
+
+    def _handle_messages(self):
+        msg = self.irc_core.message_queue.get()
+        if msg.command == "353":
+            self._show_info("People present: %s" % (msg.args[3],))
+        elif msg.command == "366":
+            # We wait until the end of the nick list to say we're
+            # connected, even though we may actually be connected earlier.
+            self._show_info("Connected!")
+        elif msg.command == "JOIN":
+            self._show_info("%s joined." % (msg.sender.nick,))
+        elif msg.command == "PART":
+            reason = msg.args[1] if len(msg.args) >= 2 else "No reason."
+            self._show_info("%s parted. (%s)" % (msg.sender.nick, reason))
+        elif msg.command == "PRIVMSG" and msg.args[0] == self.chan:
+            self._show_message(msg.sender.nick, msg.args[1])
+        self.irc_core.message_queue.task_done()
+
+        self.after(100, self._handle_messages)
 
     def _show_message(self, sender_nick, text):
         self._text['state'] = 'normal'

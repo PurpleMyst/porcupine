@@ -1,0 +1,1 @@
+../../more_plugins/irc.py
