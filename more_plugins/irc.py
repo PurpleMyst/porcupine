@@ -180,15 +180,20 @@ class IrcTab(Tab):
         self._show_info("Connecting...")
         self.irc_core = IrcCore()
         self.irc_core.connect(self.nick, self.server)
-        self.irc_core.join_channel(self.chan)
+        saelf.irc_core.join_channel(self.chan)
 
         self.bind("<Destroy>", lambda _: self.irc_core.quit())
 
-        threading.Thread(itarget=self.irc_core.mainloop).start()
+        threading.Thread(target=self.irc_core.mainloop).start()
         self._handle_messages()
 
     def _handle_messages(self):
-        msg = self.irc_core.message_queue.get()
+        try:
+            msg = self.irc_core.message_queue.get(block=False)
+        except queue.Empty:
+            self.after(100, self._handle_messages)
+            return
+
         if msg.command == "353":
             self._show_info("People present: %s" % (msg.args[3],))
         elif msg.command == "366":
