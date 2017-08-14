@@ -7,16 +7,28 @@ import threading
 
 
 class IrcEvent(enum.Enum):
+    # The comments above each enum value represent the parameters they should
+    # come with.
+
+    # ()
     connected = enum.auto()
 
-    # TODO: Do we need these two?
+    # (channel,)
     self_joined = enum.auto()
+
+    # (channel, reason)
     self_parted = enum.auto()
 
+    # (sender, channel)
     user_joined = enum.auto()
+
+    # (sender, channel, reason)
     user_parted = enum.auto()
 
+    # (recipient, text)
     sent_privmsg = enum.auto()
+
+    # (sender, recipient, text)
     recieved_privmsg = enum.auto()
 
 
