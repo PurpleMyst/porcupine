@@ -13,7 +13,7 @@ class IrcEvent(enum.Enum):
     # ()
     connected = enum.auto()
 
-    # (channel,)
+    # (channel, users_in_channel)
     self_joined = enum.auto()
 
     # (channel, reason)
@@ -135,10 +135,15 @@ class IrcCore:
                     reason = msg.args[1] if len(msg.args) >= 2 else None
                     self.event_queue.put((IrcEvent.user_parted,
                                           msg.sender, channel, reason))
+                elif msg.command == "353":
+                    # We delay telling the client we joined a channel until we
+                    # know which users are in it.
+                    _, channel, nicks = args
+                    self.event_queue.put((IrcEvent.self_joined,
+                                          channel, nicks.split()))
             elif event == _IrcInternalEvent.should_join:
                 [channel] = args
                 self._send("JOIN", channel)
-                self.event_queue.put((IrcEvent.self_joined, channel))
             elif event == _IrcInternalEvent.should_part:
                 channel, reason = args
                 if reason is None:
